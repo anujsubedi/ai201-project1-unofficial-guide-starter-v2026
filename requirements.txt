@@ -22,6 +22,14 @@ python-dotenv>=1.0,<1.2
 # Unit 2's "try a second embedding model" option is the one thing that does
 # need the heavier route. It is an optional install, not a requirement:
 #     pip install 'sentence-transformers>=3.4,<3.5'
+#
+# I DID install it, for the "second embedding model" stretch feature — see the
+# Stretch Features section of README.md. It is deliberately left out of this
+# list rather than added to it, because nothing in the required pipeline needs
+# it: `python app.py index` and `python app.py ask` both run on the bundled
+# ONNX model with only the packages below. It is needed only for
+# `--embedding-model all-mpnet-base-v2` and for `compare_embeddings.py`, and
+# both of those say so when it is missing (store.py::_sentence_transformer).
 chromadb>=0.6,<0.7
 
 # Not used directly. This is chromadb's telemetry dependency, and chromadb
