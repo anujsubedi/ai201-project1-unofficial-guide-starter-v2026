@@ -282,7 +282,7 @@ Rules:
 - Be brief. Two or three sentences is usually enough."""
 
 
-def build_prompt(question: str, results) -> str:
+def build_prompt(question: str, results, history=None) -> str:
     """
     Assemble the grounded prompt out of retrieved chunks.
 
@@ -290,18 +290,34 @@ def build_prompt(question: str, results) -> str:
     being sent — `python app.py ask "..." --show-prompt` prints exactly what
     this returns. Reading it once is the fastest way to see that retrieval,
     not the model, decides what an answer can possibly be based on.
+
+    `history` is stretch feature 2: earlier (question, answer) turns, included
+    so the model can resolve "it" and "there". The documents still come from
+    retrieval — history adds reference, never facts.
     """
     context = "\n\n".join(
         f"[from {r.source}]\n{r.text}" for r in results
     )
+
+    conversation = ""
+    if history:
+        turns = "\n\n".join(
+            f"Earlier question: {q}\nYour earlier answer: {a}" for q, a in history
+        )
+        conversation = (
+            f"Conversation so far (for resolving what the new question refers "
+            f"to — do NOT treat it as a source of facts):\n\n{turns}\n\n---\n\n"
+        )
+
     return (
+        f"{conversation}"
         f"Documents:\n\n{context}\n\n"
         f"---\n\nQuestion: {question}\n\n"
         f"Answer using only the documents above, and name the file you used."
     )
 
 
-def answer_from_chunks(question: str, results, cache: bool = True) -> str:
+def answer_from_chunks(question: str, results, cache: bool = True, history=None) -> str:
     """
     Build a grounded prompt out of retrieved chunks and send it.
 
@@ -309,5 +325,60 @@ def answer_from_chunks(question: str, results, cache: bool = True) -> str:
     first — it has already decided these chunks are close enough to be worth
     answering from.
     """
-    prompt = build_prompt(question, results)
+    prompt = build_prompt(question, results, history=history)
     return generate(prompt, system=GROUNDING_INSTRUCTION, cache=cache)
+
+
+# ─── Conversational memory (stretch feature 2) ───────────────────────────────
+
+CONDENSE_INSTRUCTION = """You rewrite follow-up questions so they can stand alone.
+
+You are given a short conversation and a new question. The new question often refers back to
+the conversation with words like "it", "there", "that one", or "then".
+
+Rewrite the new question so it makes sense on its own, with every reference spelled out.
+
+Rules:
+- Output the rewritten question and nothing else. No preamble, no quotes, no explanation.
+- Keep it a question, and keep it close to the original wording.
+- Carry over the specific names from the conversation, especially buildings, courses and places.
+- If the new question already stands on its own, output it unchanged."""
+
+
+def condense_question(history, question: str, cache: bool = True) -> str:
+    """
+    Rewrite a follow-up into a standalone question using earlier turns.
+
+    This runs BEFORE retrieval, which is the whole point. "Is it crowded then?"
+    embeds to nothing useful and the relevance gate would refuse it; "Is
+    Aldridge Hall laundry crowded on Tuesday or Wednesday morning?" retrieves
+    the same document the first turn used. Memory that only reached the answer
+    prompt would not fix that, because retrieval would already have failed.
+
+    Returns `question` unchanged when there is no history, so one-shot asks
+    behave exactly as they did before and cost no extra call.
+    """
+    if not history:
+        return question
+
+    turns = "\n\n".join(
+        f"Earlier question: {q}\nYour earlier answer: {a}" for q, a in history
+    )
+    prompt = (
+        f"Conversation so far:\n\n{turns}\n\n"
+        f"---\n\nNew question: {question}\n\n"
+        f"Rewrite the new question so it stands on its own."
+    )
+
+    try:
+        rewritten = generate(prompt, system=CONDENSE_INSTRUCTION, cache=cache).strip()
+    except Exception:
+        # A failed rewrite must never cost you the answer — fall back to
+        # searching on the question as typed.
+        return question
+
+    # A rewrite that came back empty, or as a paragraph rather than a question,
+    # is worse than the original. Keep the original in that case.
+    if not rewritten or len(rewritten) > 400:
+        return question
+    return rewritten.splitlines()[0].strip()

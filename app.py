@@ -8,9 +8,17 @@ The Unofficial Guide — command line.
     python app.py chunks                 print sample chunks      (Milestone 3)
     python app.py retrieve "question"    show distances, no answer (Milestone 4)
     python app.py corpora                list the available corpora
+    python app.py categories             list the values --category accepts
 
 Every command takes --corpus NAME to work with a different corpus without
 editing config.py.
+
+Stretch features added on top of the starter:
+
+    ask/retrieve --category dining       narrow retrieval to one topic
+    ask/retrieve --source FILE.txt       narrow retrieval to one document
+    ask --memory "q1" "q2"               let q2 build on the answer to q1
+    --embedding-model NAME               embed with a different model
 """
 
 import argparse
@@ -28,6 +36,28 @@ def cmd_corpora(args):
         print(f"{marker} {name}")
         print(f"    {blurb}\n")
     print("* = current default, set in config.py (AI201_CORPUS in .env wins)")
+
+
+def cmd_categories(args):
+    """Stretch feature 1. The valid values for --category, with counts.
+
+    Reads the documents rather than the index, so it answers before you have
+    indexed anything and doesn't need the embedding model loaded.
+    """
+    from collections import Counter
+
+    from ingest import load_documents
+    from store import category_of
+
+    corpus = args.corpus or config.CORPUS
+    counts = Counter(category_of(d.source) for d in load_documents(corpus))
+
+    print(f"Corpus: {corpus}\n")
+    print(f"{'category':<16} documents")
+    print("-" * 28)
+    for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"{name:<16} {n}")
+    print(f"\nUse with: python app.py retrieve \"...\" --category dining")
 
 
 def cmd_index(args):
@@ -144,23 +174,54 @@ def cmd_chunks(args):
     print("without reading what came before or after?")
 
 
+def _where_from(args):
+    """Build a Chroma metadata filter out of --category / --source.
+
+    Stretch feature 1. Returns None when neither flag was given, so the
+    unfiltered path is byte-for-byte what it was before this feature existed.
+    Both flags together are an AND, which Chroma spells with `$and`.
+    """
+    clauses = []
+    if getattr(args, "category", None):
+        clauses.append({"category": args.category})
+    if getattr(args, "source", None):
+        clauses.append({"source": args.source})
+
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
+
+
 def cmd_retrieve(args):
     """Milestone 4. Retrieval only, with distances, and no model call."""
     from store import search
     import gate
+
+    where = _where_from(args)
 
     results = search(
         args.question,
         top_k=args.top_k or config.TOP_K,
         corpus=args.corpus or config.CORPUS,
         variant=args.variant,
+        where=where,
     )
 
     if not results:
-        print("Nothing came back. Have you run `python app.py index`?")
+        if where:
+            print(f"Nothing matched the filter {where}.")
+            print("Metadata matching is exact, not substring. Try "
+                  "`python app.py categories` to see the valid values.")
+        else:
+            print("Nothing came back. Have you run `python app.py index`?")
         return
 
-    print(f"\nQuestion: {args.question}\n")
+    print(f"\nQuestion: {args.question}")
+    if where:
+        print(f"Filter:   {where}")
+    print()
     print(f"{'#':<3} {'distance':<10} {'source':<32} preview")
     print("-" * 100)
     for i, r in enumerate(results, 1):
@@ -183,6 +244,9 @@ def ask_pipeline(
     threshold=None,
     on_gate=None,
     on_prompt=None,
+    where=None,
+    history=None,
+    on_condense=None,
 ):
     """Retrieve, gate, answer. Returns the outcome and prints nothing.
 
@@ -201,13 +265,23 @@ def ask_pipeline(
     """
     from store import search
     import gate
-    from generate import answer_from_chunks, build_prompt
+    from generate import answer_from_chunks, build_prompt, condense_question
+
+    # Stretch feature 2. A follow-up like "is it crowded then?" carries no
+    # searchable content on its own, so it has to be rewritten into a
+    # standalone question BEFORE retrieval — gating it as-is would refuse a
+    # question the corpus can actually answer. With no history this returns
+    # `question` untouched and costs nothing.
+    search_question = condense_question(history, question) if history else question
+    if on_condense is not None and search_question != question:
+        on_condense(search_question)
 
     results = search(
-        question,
+        search_question,
         top_k=top_k or config.TOP_K,
         corpus=corpus or config.CORPUS,
         variant=variant,
+        where=where,
     )
     decision = gate.check(results, threshold=threshold)
     if on_gate is not None:
@@ -215,6 +289,7 @@ def ask_pipeline(
 
     outcome = {
         "question": question,
+        "search_question": search_question,
         "refused": not decision.passed,
         "best_distance": decision.best_distance,
         "threshold": decision.threshold,
@@ -226,12 +301,14 @@ def ask_pipeline(
         outcome["answer"] = gate.REFUSAL
         return outcome
 
-    prompt = build_prompt(question, results)
+    prompt = build_prompt(search_question, results, history=history)
     if on_prompt is not None:
         on_prompt(prompt)
 
     outcome["prompt"] = prompt
-    outcome["answer"] = answer_from_chunks(question, results)
+    outcome["answer"] = answer_from_chunks(
+        search_question, results, history=history
+    )
     outcome["sources"] = sorted({r.source for r in results})
     return outcome
 
@@ -244,6 +321,8 @@ def _ask_one(
     threshold,
     show_distances=True,
     show_prompt=False,
+    where=None,
+    history=None,
 ):
     import gate
     from generate import GROUNDING_INSTRUCTION
@@ -251,6 +330,9 @@ def _ask_one(
     def print_distances(decision):
         best = f"{decision.best_distance:.3f}"
         print(f"  (best distance {best}, cutoff {decision.threshold})")
+
+    def print_condensed(rewritten):
+        print(f"  (follow-up rewritten for search: \"{rewritten}\")")
 
     def print_prompt(prompt):
         print("\n" + "=" * 70)
@@ -271,6 +353,9 @@ def _ask_one(
         threshold=threshold,
         on_gate=print_distances if show_distances else None,
         on_prompt=print_prompt if show_prompt else None,
+        on_condense=print_condensed,
+        where=where,
+        history=history,
     )
 
     if outcome["refused"]:
@@ -284,18 +369,41 @@ def _ask_one(
 
 def cmd_ask(args):
     corpus = args.corpus or config.CORPUS
+    import gate
     import generate as gen
+
+    where = _where_from(args)
+
+    # Stretch feature 2. `history` stays None without --memory, and
+    # `ask_pipeline` skips the condense step entirely when it is empty, so the
+    # default path is unchanged.
+    history = [] if args.memory else None
+
+    def ask(question, turn=None):
+        if turn is not None:
+            print(f"\n--- Turn {turn} ---")
+            print(f"> {question}")
+        answer = _ask_one(
+            question,
+            corpus,
+            args.variant,
+            args.top_k,
+            args.threshold,
+            show_prompt=args.show_prompt,
+            where=where,
+            history=list(history) if history is not None else None,
+        )
+        # A refusal carries no information forward, so don't poison the
+        # history with it — the next follow-up would try to resolve against
+        # "I don't have enough information about that."
+        if history is not None and answer != gate.REFUSAL:
+            history.append((question, answer))
 
     try:
         if args.question:
-            _ask_one(
-                args.question,
-                corpus,
-                args.variant,
-                args.top_k,
-                args.threshold,
-                show_prompt=args.show_prompt,
-            )
+            multi = len(args.question) > 1
+            for i, question in enumerate(args.question, 1):
+                ask(question, turn=i if multi else None)
         else:
             print("Ask a question, or press Enter on an empty line to quit.\n")
             while True:
@@ -306,14 +414,7 @@ def cmd_ask(args):
                     break
                 if not question:
                     break
-                _ask_one(
-                    question,
-                    corpus,
-                    args.variant,
-                    args.top_k,
-                    args.threshold,
-                    show_prompt=args.show_prompt,
-                )
+                ask(question)
     finally:
         print(gen.usage())
 
@@ -331,10 +432,24 @@ def build_parser():
         default="default",
         help="index variant, for holding two chunkings at once (unit 2)",
     )
+    parser.add_argument(
+        "--embedding-model",
+        metavar="NAME",
+        help=(
+            "stretch: embed with a model other than the bundled "
+            "all-MiniLM-L6-v2 (e.g. all-mpnet-base-v2). Needs "
+            "sentence-transformers. Pair it with --variant so the two indexes "
+            "don't overwrite each other"
+        ),
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("corpora", help="list available corpora").set_defaults(func=cmd_corpora)
+
+    sub.add_parser(
+        "categories", help="list the metadata categories you can filter on"
+    ).set_defaults(func=cmd_categories)
 
     p_index = sub.add_parser("index", help="build the search index")
     p_index.set_defaults(func=cmd_index)
@@ -357,13 +472,37 @@ def build_parser():
     )
     p_chunks.set_defaults(func=cmd_chunks)
 
+    def add_filter_flags(p):
+        """Stretch feature 1, shared by `retrieve` and `ask`."""
+        p.add_argument(
+            "--category",
+            metavar="NAME",
+            help=(
+                "only search one category (admin, course, dining, housing...). "
+                "Exact match, not substring — see `python app.py categories`"
+            ),
+        )
+        p.add_argument(
+            "--source",
+            metavar="FILE.txt",
+            help="only search one source file. Exact filename match",
+        )
+
     p_ret = sub.add_parser("retrieve", help="show distances only (Milestone 4)")
     p_ret.add_argument("question")
     p_ret.add_argument("--top-k", type=int)
+    add_filter_flags(p_ret)
     p_ret.set_defaults(func=cmd_retrieve)
 
     p_ask = sub.add_parser("ask", help="ask a question")
-    p_ask.add_argument("question", nargs="?")
+    p_ask.add_argument(
+        "question",
+        nargs="*",
+        help=(
+            "one question, or several to run in sequence. With --memory, each "
+            "one can build on the answer before it"
+        ),
+    )
     p_ask.add_argument("--top-k", type=int)
     p_ask.add_argument("--threshold", type=float, help="override the gate cutoff")
     p_ask.add_argument(
@@ -371,6 +510,16 @@ def build_parser():
         action="store_true",
         help="print the assembled prompt before the answer",
     )
+    p_ask.add_argument(
+        "--memory",
+        action="store_true",
+        help=(
+            "stretch: carry earlier turns forward, so a follow-up like "
+            "\"is it crowded then?\" is rewritten into a standalone question "
+            "before retrieval"
+        ),
+    )
+    add_filter_flags(p_ask)
     p_ask.set_defaults(func=cmd_ask)
 
     return parser
@@ -378,6 +527,13 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+
+    # Stretch feature 3. `store._embedder()` reads config.EMBEDDING_MODEL
+    # lazily, on first use, so overriding it here — before any command touches
+    # the store — is all that's needed to swap the model for this run.
+    if getattr(args, "embedding_model", None):
+        config.EMBEDDING_MODEL = args.embedding_model
+
     try:
         args.func(args)
     except KeyboardInterrupt:

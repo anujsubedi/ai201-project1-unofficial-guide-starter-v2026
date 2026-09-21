@@ -42,6 +42,7 @@ class Result:
     label: str
     distance: float   # LOWER IS BETTER. 0.3 is close, 0.9 is unrelated.
     produced_by: str
+    category: str = "other"   # topic facet, see `category_of`
 
 
 _model = None
@@ -134,6 +135,19 @@ def _client():
     )
 
 
+def category_of(source: str) -> str:
+    """The topic facet a source file belongs to.
+
+    Stretch feature 1. Every filename in `campus_life` is prefixed with its
+    topic — `dining_pellew_dining_hall.txt`, `housing_aldridge_hall.txt`,
+    `course_biol_160.txt`, `admin_add_drop_deadline.txt` — so the prefix is a
+    facet that already exists in the corpus rather than one I invented. A file
+    with no underscore falls back to "other" instead of being dropped.
+    """
+    head = source.split("_", 1)[0]
+    return head if "_" in source and head else "other"
+
+
 def build_index(
     chunks: list[Chunk],
     corpus: str | None = None,
@@ -170,7 +184,13 @@ def build_index(
             documents=[c.text for c in window],
             embeddings=embed([c.text for c in window]),
             metadatas=[
-                {"source": c.source, "index": c.index, "produced_by": c.produced_by}
+                {
+                    "source": c.source,
+                    "index": c.index,
+                    "produced_by": c.produced_by,
+                    # Stretch feature 1: the facet `--category` filters on.
+                    "category": category_of(c.source),
+                }
                 for c in window
             ],
         )
@@ -183,11 +203,18 @@ def search(
     top_k: int | None = None,
     corpus: str | None = None,
     variant: str = "default",
+    where: dict | None = None,
 ) -> list[Result]:
     """
     Retrieve the chunks closest in meaning to a question.
 
     Returns them nearest-first, each with its distance.
+
+    `where` is stretch feature 1: a Chroma metadata filter, applied before the
+    nearest-neighbour search rather than after it, so `top_k` counts matches
+    within the filter instead of being eaten by rows that get thrown away.
+    Chroma matches metadata by equality, not substring — `{"category":
+    "dining"}` or `{"source": "housing_aldridge_hall.txt"}`.
     """
     top_k = top_k or config.TOP_K
     name = config.collection_name(corpus, variant)
@@ -202,6 +229,7 @@ def search(
     raw = collection.query(
         query_embeddings=embed([question]),
         n_results=min(top_k, collection.count()),
+        where=where or None,
     )
 
     results: list[Result] = []
@@ -215,6 +243,7 @@ def search(
                 label=f"{meta.get('source', 'unknown')}#{meta.get('index', 0)}",
                 distance=float(distance),
                 produced_by=str(meta.get("produced_by", "unknown")),
+                category=str(meta.get("category", "other")),
             )
         )
     return results
