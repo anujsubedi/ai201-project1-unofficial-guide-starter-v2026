@@ -189,10 +189,30 @@ Moment 1: I used AI (Gemini) to write the custom split_documents function in chu
 **2.**
 Moment 2: I also used it to pressure-test my custom acceptance criterion for the test questions. I gave the AI a half-written rule about the system refusing to answer if a question used profanity or asked for something harmful, but I wasn't sure how to scope it. The AI helped me frame it in a better way, so I adapted that specific angle into my final criteria.md file.
 
-<!-- ── Stretch features ─────────────────────────────────────────────────────
-     Doing one? Say so here BEFORE you start. A feature this README never
-     claims earns nothing.
-     ───────────────────────────────────────────────────────────────────────── -->
+## Stretch Features
+
+I am attempting all three stretch options. Declaring them here before I build them:
+
+**1. Metadata filtering.** Every filename in `campus_life` carries a topic prefix —
+`admin_`, `course_`, `dining_`, `housing_`. I will store that prefix as a `category` field
+on each chunk at index time and add `--category` and `--source` flags so retrieval can be
+narrowed to one facet. I will show the same query run with and without the filter and say
+what moved.
+
+**2. Conversational memory.** A follow-up like "is it crowded then?" retrieves nothing on its
+own and my gate correctly refuses it, so memory has to act *before* retrieval, not just at
+answer time. I will condense each follow-up into a standalone question using the previous
+turn, then retrieve on the condensed version. I will show a two-turn exchange where turn 2
+is unanswerable without turn 1.
+
+**3. A second embedding model.** I will index the same corpus a second time under a separate
+variant using `all-mpnet-base-v2` (768 dimensions) instead of the bundled
+`all-MiniLM-L6-v2` (384), then run all ten of my questions through both and record which
+distances moved and in which direction. I expect my 0.70 cutoff to need changing, because a
+different model means a different distance distribution.
+
+*Written before implementation. Results for each are in the three subsections that follow
+once built.*
 
 ---
 
