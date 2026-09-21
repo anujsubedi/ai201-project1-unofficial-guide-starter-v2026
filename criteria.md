@@ -25,6 +25,7 @@ contains the answer.
 **Why this target:**
 <!-- e.g. "One of my questions is about a topic only two documents mention, so
      I expect that one to be hard." -->
+We want our model to be resonably reliable keeping some room for unexpected errors that can result from different answer framings that don't exactly match the answer or don't fully achieve what we look for. 4 out of 5 sets a realistic standard while still ensuring it works 80% of the time. 
 
 ---
 
@@ -35,7 +36,7 @@ Every answer the system produces names at least one source document.
 **Why this target:**
 <!-- Why all five and not four? What about your setup makes that achievable —
      or what would have to go wrong for it not to be? -->
-
+We want all of our answers to be sourced from our corpus. It is absolutely essential that ALL of our answers follow this to ensure that the model isn't sourcing information from anywhere outside the corpus.
 ---
 
 ## 3. The relevance gate stops out-of-corpus questions
@@ -52,7 +53,7 @@ in at least 4 of 5 tries.
 **Why this target:**
 <!-- What did your distances look like when you set the cutoff in Milestone 4?
      Was there a clean gap, or did the two groups overlap? -->
-
+4 out of 5 again ensures that we have a realistic standard while leaving room for unexpected errors.
 ---
 
 ## 4. Something about your chunks
@@ -69,10 +70,10 @@ in at least 4 of 5 tries.
        - "No chunk is shorter than 200 characters, since anything below that
           in my corpus turned out to be a heading with no content under it." -->
 
-
+In a random sample of 5 chunks, 5 out of 5 will contain the exact, complete text of a single source file without being cut.
 
 **Why this target:**
-
+Because my corpus files are already separated into atomic, self-contained topics, the best way to preserve context is to make each document exactly one chunk.
 
 
 ---
@@ -86,11 +87,11 @@ in at least 4 of 5 tries.
      handles badly, about source attribution being correct rather than merely
      present — anything, as long as it names a number or an observable
      outcome. -->
-
+In 4 out of 5 tries, the system refuses to answer if the question uses profanity or asks for something explicitly illegal.
 
 
 **Why this target:**
-
+Again, I chose 4 out of 5 because while the prompt instructions should catch blatant violations, AI models can sometimes be tricked by borderline phrasing, so a 100% success rate is unrealistic for a baseline prompt.
 
 
 ---
