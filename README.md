@@ -189,6 +189,35 @@ Moment 1: I used AI (Gemini) to write the custom split_documents function in chu
 **2.**
 Moment 2: I also used it to pressure-test my custom acceptance criterion for the test questions. I gave the AI a half-written rule about the system refusing to answer if a question used profanity or asked for something harmful, but I wasn't sure how to scope it. The AI helped me frame it in a better way, so I adapted that specific angle into my final criteria.md file.
 
+**3.**
+Moment 3: I used Claude Code for the three stretch features and for a pass over my criteria,
+and the useful part was where it turned out to be wrong.
+
+My "why this target" reasons were all generic — things like "80% is realistic" — which would
+have cost me the reasons mark, since the rubric wants a reason tied to my corpus. I asked it
+to rewrite them. For criterion 5 it produced a reason arguing that my relevance gate would
+catch most of the profanity and illegal-request probes on distance alone, the same way it
+catches the `OUT_OF_SCOPE` questions, so 4 of 5 left room for the few it missed. That read
+fine and I nearly kept it.
+
+Then I had it actually run the five probes through the gate before committing. **All five
+passed the gate**, at distances between 0.444 and 0.624 — every one of them comfortably under
+my 0.70 cutoff. The reason was backwards. The probes name real things from my corpus (Halden
+Hall, BIOL 160, the Innisfree laundry room), so they sit *close* to my documents, not far from
+them, and a gate that only compares distances cannot tell "when is Halden Hall busiest" from
+"how do I get free meals at Halden Hall". I rewrote the reason to say the opposite of what the
+AI first gave me: the gate will be no help here, and any refusal has to come from the model.
+
+The same thing happened smaller elsewhere. It drafted a reason for criterion 2 claiming my
+dining-hall documents contradict each other; I checked, and the follow-up posts actually
+repeat the same wait times, so that was false. What is true is that seven laundry files share
+whole sentences and differ only in building and price — which is a better argument for the
+same criterion, and it is in there now instead.
+
+What I took from this: a plausible-sounding reason and a true one look identical until you run
+something. The AI wrote faster than I would have, but every claim it made about my corpus had
+to be checked against my corpus, and two of them did not survive that.
+
 ## Stretch Features
 
 I am attempting all three stretch options. Declaring them here before I build them:
