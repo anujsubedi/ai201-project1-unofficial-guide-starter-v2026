@@ -8,8 +8,8 @@ Anyone can re-run it and get the same numbers.
 It runs all five in-corpus QUESTIONS and all five OUT_OF_SCOPE questions from
 questions.py against two indexes of the same corpus:
 
-    the bundled model   all-MiniLM-L6-v2   384 dimensions, indexed as "default"
-    the second model    all-mpnet-base-v2  768 dimensions, indexed as "mpnet"
+    the bundled model   all-MiniLM-L6-v2      384 dimensions, local, "default"
+    the second model    gemini-embedding-001  3072 dimensions, API, "gemini"
 
 and prints, for each question, the best distance under each model, which
 source came back first, and the change.
@@ -17,13 +17,15 @@ source came back first, and the change.
 Build both indexes first:
 
     python app.py index
-    python app.py --variant mpnet --embedding-model all-mpnet-base-v2 index
+    python app.py --variant gemini --embedding-model gemini-embedding-001 index
 
 Then:
 
     python compare_embeddings.py
 
-Nothing here calls the hosted model. Retrieval only, so it costs no API quota.
+No answers are generated here — retrieval only. The gemini side does spend a
+small amount of embedding quota, because each question has to be embedded
+before it can be searched: ten questions, one call each.
 """
 
 import argparse
@@ -32,7 +34,7 @@ import config
 from questions import QUESTIONS, OUT_OF_SCOPE
 
 BUNDLED = ("all-MiniLM-L6-v2", "default")
-SECOND = ("all-mpnet-base-v2", "mpnet")
+SECOND = ("gemini-embedding-001", "gemini")
 
 
 def best_for(questions, model_name, variant, corpus):
@@ -67,7 +69,7 @@ def best_for(questions, model_name, variant, corpus):
 def table(title, questions, left, right):
     print(f"\n### {title}\n")
     print(
-        "| Question | MiniLM (384d) | top source | mpnet (768d) | top source | change |"
+        "| Question | MiniLM (384d) | top source | Gemini (3072d) | top source | change |"
     )
     print("|---|---|---|---|---|---|")
     for question, (ld, ls), (rd, rs) in zip(questions, left, right):

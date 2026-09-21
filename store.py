@@ -51,6 +51,11 @@ _model = None
 # "fetch that one from Hugging Face instead" — see `_embedder`.
 BUNDLED_MODEL = "all-MiniLM-L6-v2"
 
+# Models embedded over the API rather than on this machine. Stretch feature 3.
+# Anything not listed here and not the bundled model is looked for through
+# sentence-transformers.
+API_MODELS = {"gemini-embedding-001", "text-embedding-004"}
+
 
 class _OnnxEmbedder:
     """
@@ -68,6 +73,59 @@ class _OnnxEmbedder:
 
     def encode(self, texts, show_progress_bar: bool = False):
         return [vector.tolist() for vector in self._ef(list(texts))]
+
+
+class _GeminiEmbedder:
+    """
+    Stretch feature 3: a second embedding model, called over the API.
+
+    The course's suggested route for this is `sentence-transformers`, which
+    brings PyTorch with it — about 2 GB. My connection could not finish that
+    download, so I used the other kind of second model instead: a hosted one.
+    It needs no download at all, reuses the `GEMINI_API_KEY` that is already in
+    `.env`, and is a bigger change than swapping one local MiniLM for another —
+    3072 dimensions against the bundled model's 384.
+
+    Two things worth knowing:
+
+    - Embedding calls are NOT the same quota as the answer calls in
+      generate.py, and they do not go through its budget guard. Indexing the
+      whole corpus is a handful of batched calls, not 88.
+    - This is the one embedder here that needs the network at query time too,
+      because the question has to be embedded before it can be searched.
+    """
+
+    # Well under the API's per-request cap, and it keeps one failure from
+    # costing the whole corpus.
+    BATCH = 32
+
+    def __init__(self, name: str):
+        self._name = name
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from google import genai
+
+            key = os.getenv("GEMINI_API_KEY", "").strip()
+            if not key:
+                raise RuntimeError(
+                    f"EMBEDDING_MODEL is {self._name!r}, which is embedded over "
+                    f"the API, but there is no GEMINI_API_KEY in your .env."
+                )
+            self._client = genai.Client(api_key=key)
+        return self._client
+
+    def encode(self, texts, show_progress_bar: bool = False):
+        texts = list(texts)
+        vectors = []
+        for start in range(0, len(texts), self.BATCH):
+            window = texts[start : start + self.BATCH]
+            response = self._get_client().models.embed_content(
+                model=self._name, contents=window
+            )
+            vectors.extend(list(e.values) for e in response.embeddings)
+        return vectors
 
 
 def _sentence_transformer(name: str):
@@ -114,6 +172,8 @@ def _embedder():
         _model = FakeEmbedder()
     elif config.EMBEDDING_MODEL == BUNDLED_MODEL:
         _model = _OnnxEmbedder()
+    elif config.EMBEDDING_MODEL in API_MODELS:
+        _model = _GeminiEmbedder(config.EMBEDDING_MODEL)
     else:
         _model = _sentence_transformer(config.EMBEDDING_MODEL)
 
