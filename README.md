@@ -1,6 +1,6 @@
 # The Unofficial Guide
 
-<!-- Replace this line with your name and which corpus you picked. -->
+Anuj Subedi. I picked the campus_life corpus. 
 
 > **This file is your submission.** Fill it in as you go — most sections get
 > written during the milestone that produces them, not at the end.
@@ -26,7 +26,7 @@
      this repo.
 
      Milestone 5. -->
-
+This system is an AI-powered Q&A tool designed to answer student questions about university housing, dining, academic policies, and campus life. It uses the `campus_life` corpus, which consists of short, crowdsourced text files containing unofficial student advice. When a user asks a question, the system retrieves the most relevant files and uses them to generate a grounded answer, refusing to answer if the topic is not covered in the documents.    
 ## Chunking Strategy
 
 **Chunk size:**
@@ -41,6 +41,10 @@
      more than pretending you got it right first time.
 
      Milestone 3. -->
+**Chunk size:** 1 entire document
+**Overlap:** 0
+
+Because I selected the `campus_life` corpus, my documents consist of very short 1-3 sentence text files (like quick reviews of a dining hall or a specific class). Standard character-based chunking would arbitrarily slice these short thoughts in half and destroy the context. Therefore, I wrote a custom chunker that treats each individual text file as exactly one chunk with zero overlap, ensuring the AI reads the complete thought every time.
 
 ## Sample Chunks
 
@@ -174,8 +178,9 @@ I set the cutoff to 0.70 because my in-scope questions ranged from 0.231 to 0.57
      Milestone 5. -->
 
 **1.**
-
+Moment 1: I used AI (Gemini) to write the custom split_documents function in chunker.py. I explained that my campus_life corpus consisted of very short 1-3 sentence files. The AI suggested that slicing them by character count would destroy the context, and wrote a script that treats one entire document as exactly one chunk. I reviewed the code, replaced the fallback_split call with it, and tested the output to ensure the files remained fully intact.
 **2.**
+Moment 2: I also used it to pressure-test my custom acceptance criterion for the test questions. I gave the AI a half-written rule about the system refusing to answer if a question used profanity or asked for something harmful, but I wasn't sure how to scope it. The AI helped me frame it in a better way, so I adapted that specific angle into my final criteria.md file.
 
 <!-- ── Stretch features ─────────────────────────────────────────────────────
      Doing one? Say so here BEFORE you start. A feature this README never
