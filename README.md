@@ -216,6 +216,148 @@ once built.*
 
 ---
 
+### Stretch 1 — Metadata filtering
+
+**What I added.** Every file in `campus_life` is named with a topic prefix, so the facet was
+already in the corpus and I only had to store it. `store.py::category_of` takes the text
+before the first underscore, and `build_index` writes it onto each chunk as `category`.
+`store.search` now takes a `where` dict handed straight to Chroma, so the filter is applied
+*before* the nearest-neighbour search rather than filtering the top 5 afterwards — otherwise
+a `--category dining` search would keep throwing rows away and return fewer than 5.
+
+`python app.py categories` lists what is filterable:
+
+| category | documents |
+|---|---|
+| course | 27 |
+| housing | 21 |
+| admin | 16 |
+| dining | 14 |
+| money | 2 |
+| study | 2 |
+| transit | 2 |
+| advising, health, orientation, winter | 1 each |
+
+**The same query, with and without the filter.** I picked *"when is it busiest?"* because it
+is deliberately ambiguous — nothing in it says whether I mean a dining hall or a course.
+
+Without the filter — `python app.py retrieve "when is it busiest?"`:
+
+```
+#   distance   source                           preview
+----------------------------------------------------------------------------------------------------
+1   0.5473     course_stat_150_workload.txt     Workload for STAT 150 Applied Statistics  People kee...
+2   0.5600     course_econ_101_workload.txt     Workload for ECON 101 Introduction to Economics  Peo...
+3   0.5626     housing_calder_annexe_noise.txt  Noise levels in Calder Annexe  Asked about this a lo...
+4   0.5678     course_cs_210_workload.txt       Workload for CS 210 Data Structures  People keep ask...
+5   0.5818     course_math_220_workload.txt     Workload for MATH 220 Linear Algebra  People keep as...
+
+Gate: best distance 0.547 is under the 0.7 cutoff
+```
+
+With the filter — `python app.py retrieve "when is it busiest?" --category dining`:
+
+```
+Question: when is it busiest?
+Filter:   {'category': 'dining'}
+
+#   distance   source                           preview
+----------------------------------------------------------------------------------------------------
+1   0.6000     dining_pellew_dining_hall_followup.txt Re: Pellew Dining Hall  Adding to what people have s...
+2   0.6093     dining_halden_hall_followup.txt  Re: Halden Hall  Adding to what people have said abo...
+3   0.6266     dining_the_ridgeway_cafe_followup.txt Re: The Ridgeway Café  Adding to what people have sa...
+4   0.6317     dining_verrill_street_grill_followup.txt Re: Verrill Street Grill  Adding to what people have...
+5   0.6377     dining_kestrel_commons_followup.txt Re: Kestrel Commons  Adding to what people have said...
+```
+
+**What changed, and the thing I didn't expect.** All five results changed — four of the five
+unfiltered hits were course-workload documents, which match the *phrasing* of "when is it
+busiest" (they all contain "People keep asking so...") without being about crowds at all.
+Filtered, all five are dining wait-time posts, which is what the question actually meant.
+
+The unexpected part is the direction of the numbers: **the best distance got worse, 0.547 →
+0.600, while the answer got better.** I had assumed a filter would improve the distance. It
+does the opposite, and the reason is that the filter removes documents that were genuinely
+closer *in wording* than anything in `dining` is. That is a concrete demonstration that a low
+distance means "similar text", not "correct answer" — and it means my 0.7 cutoff is doing less
+work than I thought, because a confidently wrong result sat at 0.547, well inside the gate.
+
+I also added `--source FILE.txt` for narrowing to a single document, and both flags can be
+combined (Chroma `$and`). Matching is exact, not substring; an unmatched filter prints a
+message pointing at `python app.py categories` rather than failing silently.
+
+---
+
+### Stretch 2 — Conversational memory
+
+**What I added.** The naive version of this — paste the last turn into the answer prompt —
+does not work with a relevance gate in front of it, and finding that out is most of what I
+learned here. A follow-up like *"Is it crowded then?"* contains no searchable content, so
+retrieval brings back the wrong documents and the answer fails **before** the prompt is ever
+assembled. Memory has to act earlier than the prompt.
+
+So `generate.py::condense_question` rewrites the follow-up into a standalone question using
+the previous turn, and `ask_pipeline` retrieves on *that*. History is also passed into
+`build_prompt`, explicitly labelled as context for resolving references and not as a source of
+facts, so grounding still comes only from retrieved chunks.
+
+**The control — the same two turns without `--memory`:**
+
+```
+--- Turn 2 ---
+> Is it crowded then?
+  (best distance 0.636, cutoff 0.7)
+
+I do not have enough information to answer whether the housing is crowded.
+
+Sources retrieved: housing_aldridge_hall.txt, housing_calder_annexe.txt, housing_fenwick_court.txt, housing_fenwick_court_noise.txt, housing_tamsin_court.txt
+```
+
+**The two-turn exchange with memory** —
+`python app.py ask --memory "What is the best time to do your laundry at Aldridge Hall?" "Is it crowded then?"`:
+
+```
+--- Turn 1 ---
+> What is the best time to do your laundry at Aldridge Hall?
+  (best distance 0.310, cutoff 0.7)
+
+The best time to do your laundry at Aldridge Hall is Tuesday or Wednesday morning.
+
+Source: housing_aldridge_hall_laundry.txt
+
+Sources retrieved: dining_halden_hall.txt, housing_aldridge_hall.txt, housing_aldridge_hall_laundry.txt, housing_innisfree_hall_laundry.txt, housing_tamsin_court_laundry.txt
+
+
+--- Turn 2 ---
+> Is it crowded then?
+  (follow-up rewritten for search: "Is the laundry room at Aldridge Hall crowded on Tuesday or Wednesday morning?")
+  (best distance 0.364, cutoff 0.7)
+
+Based on the documents provided, Tuesday or Wednesday morning is listed as the best time to do laundry at Aldridge Hall, whereas Sunday evenings are crowded and you will have to wait.
+
+Source: `housing_aldridge_hall_laundry.txt`
+
+Sources retrieved: housing_aldridge_hall.txt, housing_aldridge_hall_laundry.txt, housing_aldridge_hall_noise.txt, housing_morrow_house_noise.txt, housing_old_brewhouse_noise.txt
+```
+
+**Turn 2 depends on turn 1 in two separate ways**, which is why I chose this pair:
+
+- *"it"* is the Aldridge laundry room — named only in turn 1's question.
+- *"then"* is **Tuesday or Wednesday morning** — a fact that appears nowhere in turn 2 and was
+  produced by turn 1's *answer*, not its question. Carrying the question forward alone would
+  not have been enough.
+
+**What changed, measurably.** Best distance on turn 2 went **0.636 → 0.364**, and the outcome
+went from a refusal to a grounded answer citing `housing_aldridge_hall_laundry.txt`. The
+rewritten query is printed on every memory turn so the rewrite is visible rather than hidden.
+
+Two deliberate details: refusals are not appended to the history, since resolving a later
+follow-up against *"I don't have enough information"* would make things worse; and if the
+rewrite call fails or returns something malformed, it falls back to the question as typed, so
+memory can never cost you an answer you would otherwise have got.
+
+---
+
 # Unit 2
 
 <!-- These sections get ADDED to what's already above. Don't delete or rewrite
