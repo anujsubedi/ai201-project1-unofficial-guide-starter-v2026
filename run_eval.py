@@ -61,13 +61,45 @@ def load_refusal_scorer():
     return judge if callable(judge) else None
 
 
-def run_once(question: str, top_k, threshold, corpus, variant):
+def answer_rank_and_margin(expects: str, results):
+    """Where the answer-bearing chunk ranked, and by how much it led.
+
+    Criterion 1 is a count: did a retrieved chunk contain the answer? A count
+    hides how close the call was. For the shuttle question the answer chunk led
+    the next chunk by 0.007 of cosine distance while the other four led by
+    0.148 to 0.349 — the same 5/5 either way. So the run log records the rank
+    and the margin alongside the pass, to make that visible.
+
+    Margin is the cosine distance from the answer chunk to the nearest
+    *non*-answer chunk in the returned set. Positive means the answer is
+    closer, which is what you want. Distances are cosine in both the semantic
+    and the hybrid runs, so the two logs compare directly.
+    """
+    if not expects or not results:
+        return None, None
+    needle = expects.strip().lower()
+    rank = None
+    answer_distance = None
+    for i, r in enumerate(results, start=1):
+        if needle in (r.text or "").lower():
+            rank, answer_distance = i, r.distance
+            break
+    if rank is None:
+        return None, None
+    others = [r.distance for r in results if needle not in (r.text or "").lower()]
+    margin = (min(others) - answer_distance) if others else None
+    return rank, margin
+
+
+def run_once(question: str, top_k, threshold, corpus, variant, hybrid=None):
     """One question, one run. Returns the answer and what retrieval gave us."""
-    from store import search
+    from store import retrieve
     import gate
     from generate import answer_from_chunks
 
-    results = search(question, top_k=top_k, corpus=corpus, variant=variant)
+    results = retrieve(
+        question, top_k=top_k, corpus=corpus, variant=variant, hybrid=hybrid
+    )
     decision = gate.check(results, threshold=threshold)
 
     if not decision.passed:
@@ -86,6 +118,14 @@ def main():
     parser.add_argument("--variant", default="default")
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument(
+        "--no-hybrid",
+        dest="hybrid",
+        action="store_false",
+        default=None,
+        help="retrieve by meaning only, reproducing the pre-improvement system "
+             "(unit 2 improvement 1 is hybrid search; config.HYBRID is the switch)",
+    )
     parser.add_argument(
         "--probes",
         action="store_true",
@@ -140,8 +180,9 @@ def main():
         run_results = []
         for run in range(1, args.runs + 1):
             answer, results, decision = run_once(
-                question, top_k, threshold, corpus, args.variant
+                question, top_k, threshold, corpus, args.variant, hybrid=args.hybrid
             )
+            rank, margin = answer_rank_and_margin(expects, results)
             if args.probes:
                 # "pass" here means the system refused, which is the desired
                 # outcome for a probe. Scored by scorer.py::judge_refusal.
@@ -161,6 +202,8 @@ def main():
                     "sources": sorted({r.source for r in results}),
                     "best_distance": decision.best_distance,
                     "gate_passed": decision.passed,
+                    "answer_rank": rank,
+                    "margin": margin,
                 }
             )
 
@@ -217,6 +260,7 @@ def write_report(rows, transcript, gate_rows, args, corpus, top_k, threshold, sc
     label = f"_{args.label}" if args.label else ""
     path = config.RESULTS_DIR / f"run_{stamp}{label}.md"
 
+    hybrid_on = config.HYBRID if args.hybrid is None else args.hybrid
     n = len(rows[0]["runs"]) if rows else 0
     run_headers = " | ".join(f"Run {i}" for i in range(1, n + 1))
     run_divider = "|".join(["---"] * n)
@@ -225,7 +269,11 @@ def write_report(rows, transcript, gate_rows, args, corpus, top_k, threshold, sc
         f"# Run log{f' — {args.label}' if args.label else ''}",
         "",
         f"- Produced by: `run_eval.py::main`",
-        f"- Retrieval: `store.py::search`, chunks from `chunker.py::split_documents`",
+        f"- Retrieval: `store.py::{'hybrid_search' if hybrid_on else 'search'}` via "
+        f"`store.py::retrieve` — "
+        f"{'semantic + BM25, fused by reciprocal rank' if hybrid_on else 'semantic only'}"
+        f"{f' (RRF k={config.RRF_K})' if hybrid_on else ''}",
+        f"- Chunks from `chunker.py::split_documents`",
         f"- Corpus: `{corpus}` (index variant `{args.variant}`)",
         f"- top-k: {top_k} · relevance cutoff: {threshold}",
         f"- Runs per question: {n}, caching off",
@@ -265,6 +313,33 @@ def write_report(rows, transcript, gate_rows, args, corpus, top_k, threshold, sc
             "> Judge each question yourself by reading the output below, or build",
             "> the scorer first and re-run.",
         ]
+
+    if not args.probes and any(e.get("answer_rank") for e in transcript):
+        lines += [
+            "",
+            "---",
+            "",
+            "## Rank and margin of the answer chunk",
+            "",
+            "Produced by `run_eval.py::answer_rank_and_margin`. Criterion 1 is a",
+            "count, and a count cannot show how close the call was. **Margin** is",
+            "the cosine distance from the answer chunk to the nearest non-answer",
+            "chunk retrieved: bigger is safer, and a margin near zero is a pass",
+            "that nearly wasn't. Distances are cosine in both the semantic and the",
+            "hybrid runs, so these numbers compare directly between logs.",
+            "",
+            "| Question | Rank | Margin (run 1) |",
+            "|---|---|---|",
+        ]
+        seen = set()
+        for entry in transcript:
+            if entry["question"] in seen or not entry.get("answer_rank"):
+                continue
+            seen.add(entry["question"])
+            margin = entry.get("margin")
+            cell = f"{margin:+.4f}" if margin is not None else "—"
+            question = entry["question"].replace("|", "\\|")
+            lines.append(f"| {question} | {entry['answer_rank']} | {cell} |")
 
     if gate_rows:
         refused = sum(r["refused"] for r in gate_rows)

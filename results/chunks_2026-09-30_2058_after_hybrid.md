@@ -1,0 +1,231 @@
+# Chunk boundary check — after_hybrid
+
+- Produced by: `check_chunks.py::sample_chunks` and `check_chunks.py::corpus_wide`
+- Chunks from: `chunker.py::split_documents`, documents from `ingest.py::load_documents`
+- Corpus: `campus_life` — 88 documents, 88 chunks
+- Sample size: 5 · seeds: 201, 202, 203
+- When: 2026-09-30 20:58
+
+This is the evidence for criterion 4 in criteria.md: "In a random sample
+of 5 chunks, 5 out of 5 will contain the exact, complete text of a single
+source file without being cut."
+
+A chunk passes if its text is exactly its source file's text (**whole**)
+and that file produced no other chunk (**alone**). No model is called and
+the index is not touched, so each seed is a different sample of the same
+fixed chunking — the three runs differ only in which chunks they look at.
+
+| Run | Seed | Passed |
+|---|---|---|
+| Run 1 | 201 | 5 of 5 |
+| Run 2 | 202 | 5 of 5 |
+| Run 3 | 203 | 5 of 5 |
+
+## Corpus-wide, not just the samples
+
+- 88 chunks from 88 source files
+- Files split across more than one chunk: **0**
+- Chunks whose text differs from their source file: **0**
+
+---
+
+## The sampled chunks
+
+### Run 1 — seed 201
+
+**admin_meal_plan_changes.txt** — PASS (whole: True, alone: True)
+
+- chunk 222 chars / file 222 chars
+- chunks from this file: 1
+
+```
+On the meal plan changes
+
+You can change your meal plan tier once, in the first ten days of the semester. After that it's locked. Downgrading refunds the difference to your student account; upgrading bills you immediately.
+```
+
+**course_stat_150.txt** — PASS (whole: True, alone: True)
+
+- chunk 407 chars / file 407 chars
+- chunks from this file: 1
+
+```
+STAT 150 Applied Statistics
+
+Transferred in last year, so take this with a grain of salt. Format is flipped: watch the recordings, class time is problem sets. Assessment: three equally weighted midterms, no final. No curve, but the lowest midterm is dropped.
+
+Expect 5 to 6 hours a week outside class.
+
+The one piece of advice: the dropped midterm makes the first one low-stakes; use it to learn the format.
+```
+
+**dining_the_atrium_followup.txt** — PASS (whole: True, alone: True)
+
+- chunk 341 chars / file 341 chars
+- chunks from this file: 1
+
+```
+Re: The Atrium
+
+Adding to what people have said about The Atrium. The wait figure of no queue matches what I've seen. If you're trying to eat between classes, go before 11:45 and it's a different building entirely.
+
+Also worth saying: picked clean by 1:15 and not restocked again until the next morning. Nobody tells you this at orientation.
+```
+
+**admin_add_drop_deadline.txt** — PASS (whole: True, alone: True)
+
+- chunk 300 chars / file 300 chars
+- chunks from this file: 1
+
+```
+On the add/drop deadline
+
+You can add a course through the end of the second week. Dropping is a longer window — through the end of week six — but a drop after week two shows as a W on your transcript. Nothing anywhere on the registrar's site says this plainly, and students find out from each other.
+```
+
+**course_math_220_exams.txt** — PASS (whole: True, alone: True)
+
+- chunk 186 chars / file 186 chars
+- chunks from this file: 1
+
+```
+MATH 220 Linear Algebra — assessment
+
+Two midterms and a cumulative final. Curved to a b- median.
+
+The problem sets are the course; the lectures make sense afterwards rather than during.
+```
+
+### Run 2 — seed 202
+
+**dining_north_kitchen_followup.txt** — PASS (whole: True, alone: True)
+
+- chunk 317 chars / file 317 chars
+- chunks from this file: 1
+
+```
+Re: North Kitchen
+
+Adding to what people have said about North Kitchen. The wait figure of none matches what I've seen. If you're trying to eat between classes, go before 11:45 and it's a different building entirely.
+
+Also worth saying: closed all summer and during reading week. Nobody tells you this at orientation.
+```
+
+**orientation_what_matters.txt** — PASS (whole: True, alone: True)
+
+- chunk 345 chars / file 345 chars
+- chunks from this file: 1
+
+```
+What actually matters in orientation week
+
+Most of it is optional and framed as though it isn't. The two sessions worth going to are the one where you meet your academic adviser and the library walkthrough, because both save you time later.
+
+The club fair is genuinely useful but goes on for four hours and you only need the first forty minutes.
+```
+
+**housing_aldridge_hall_laundry.txt** — PASS (whole: True, alone: True)
+
+- chunk 299 chars / file 299 chars
+- chunks from this file: 1
+
+```
+Laundry in Aldridge Hall
+
+Machines take $1.75 wash, $1.50 dry, card only. There are eight washers and six dryers for the building, which is the wrong ratio and means the dryers back up on Sunday evenings.
+
+Best time to do laundry here is Tuesday or Wednesday morning. Sunday after 6pm you will wait.
+```
+
+**dining_the_atrium.txt** — PASS (whole: True, alone: True)
+
+- chunk 421 chars / file 421 chars
+- chunks from this file: 1
+
+```
+The Atrium
+
+Transferred in last year, so take this with a grain of salt. Wait times: no queue, it's all grab-and-go refrigerated cases. The thing worth going for is genuinely good sandwiches restocked twice a day. The thing to know is that picked clean by 1:15 and not restocked again until the next morning.
+
+Hours are 8:00am to 6:00pm weekdays. Costs one meal swipe for a sandwich-plus-drink combination, or à la carte.
+```
+
+**course_cs_340_workload.txt** — PASS (whole: True, alone: True)
+
+- chunk 271 chars / file 271 chars
+- chunks from this file: 1
+
+```
+Workload for CS 340 Databases
+
+People keep asking so: 6 hours a week early, 15 in the last three weeks when the project lands. That's real time, not optimistic time.
+
+It's front-loaded — the first month is heavier than the rest, partly because you're learning the format.
+```
+
+### Run 3 — seed 203
+
+**admin_printing_quota.txt** — PASS (whole: True, alone: True)
+
+- chunk 230 chars / file 230 chars
+- chunks from this file: 1
+
+```
+On the printing quota
+
+Every student gets $30 of printing per semester, which is roughly 600 black-and-white pages. It does not roll over. Colour costs eight times as much per page, which people discover after printing one poster.
+```
+
+**admin_graduation_requirements.txt** — PASS (whole: True, alone: True)
+
+- chunk 282 chars / file 282 chars
+- chunks from this file: 1
+
+```
+On the graduation requirements
+
+120 credit hours, a completed major, and the general education requirements. The one that trips people is the writing-intensive requirement: two courses, and they must be taken in different departments. Check this in your third year, not your fourth.
+```
+
+**housing_calder_annexe.txt** — PASS (whole: True, alone: True)
+
+- chunk 430 chars / file 430 chars
+- chunks from this file: 1
+
+```
+Calder Annexe — what it's actually like
+
+Second-year here. Built 2003. Rooms are mostly singles, some doubles, in clusters of six around a lounge.
+
+The good: the cluster lounges mean you meet people without having to try.
+
+The bad: the singles are small — about 90 square feet — and the desks are fixed.
+
+Laundry costs $2.00 wash, $1.75 dry, app-based. On noise: depends entirely on your cluster; there's no building-wide pattern.
+```
+
+**housing_old_brewhouse_noise.txt** — PASS (whole: True, alone: True)
+
+- chunk 324 chars / file 324 chars
+- chunks from this file: 1
+
+```
+Noise levels in Old Brewhouse
+
+Asked about this a lot so writing it down. Sound carries strangely because of the original brick; a room two floors up can be louder than next door.
+
+If you're someone who needs quiet to work, the library is open until 2am during term and that's what most people in this building end up doing.
+```
+
+**course_econ_101_exams.txt** — PASS (whole: True, alone: True)
+
+- chunk 231 chars / file 231 chars
+- chunks from this file: 1
+
+```
+ECON 101 Introduction to Economics — assessment
+
+Two midterms and a final, all multiple choice. Curved, and generously.
+
+The discussion section is where the exam-style questions get worked; attendance isn't taken but it correlates.
+```

@@ -507,6 +507,31 @@ under `--variant gemini`, so both are there to compare.*
      unit 1 — the point is that someone can see what you said before you knew
      how it went. -->
 
+## What I'm adding this unit
+
+Declared before building, as the stretch rules ask.
+
+**Improvement 1 (required) — hybrid search.** Add BM25 keyword retrieval
+alongside the existing semantic search and fuse the two by reciprocal rank.
+Aimed at the shuttle question, where the answer chunk leads the next chunk by
+0.007 of cosine distance while my other four lead by 0.148 to 0.349.
+
+**Stretch — a second measured improvement: a second chunking strategy.** My
+chunker makes one chunk per file. I will index the same corpus a second way —
+fixed 200-character windows with 50 characters of overlap, via
+`chunker.py::fallback_split`, as index variant `v2` — and run all five criteria
+against it, three runs each, in the same table format.
+
+I expect this one to make things **worse**, and that is why it is worth running.
+Criterion 4 says every chunk is the complete text of a single file, so a chunker
+that cuts files into 200-character windows should fail it outright, and splitting
+a two-sentence post in half should pull answers apart the way the unit's own
+example describes. Declaring the prediction now means the result can contradict
+me.
+
+Both improvements are measured the same way: `run_eval.py` for criteria 1, 2, 3,
+`run_eval.py --probes` for criterion 5, `check_chunks.py` for criterion 4.
+
 ## Run Log — Before
 
 <!-- Your five criteria, three runs each. `python run_eval.py --label before`

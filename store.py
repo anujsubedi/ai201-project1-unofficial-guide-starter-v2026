@@ -18,6 +18,7 @@ rest of the project if they were wrong:
 """
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 
@@ -307,6 +308,161 @@ def search(
             )
         )
     return results
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase alphanumeric runs. BM25 needs tokens, not a string."""
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+_bm25_cache: dict[str, tuple] = {}
+
+
+def _bm25_for(name: str):
+    """BM25 over every chunk in a collection, built once per collection.
+
+    Over *every* chunk, not just the ones semantic search already liked. A
+    keyword index that can only re-rank the semantic top-k cannot rescue a
+    document that semantic search missed entirely, which is most of the point.
+    """
+    if name in _bm25_cache:
+        return _bm25_cache[name]
+
+    from rank_bm25 import BM25Okapi
+
+    collection = _client().get_collection(name)
+    raw = collection.get(include=["documents", "metadatas"])
+    texts = raw["documents"]
+    metas = raw["metadatas"]
+    bm25 = BM25Okapi([_tokenize(t) for t in texts])
+
+    _bm25_cache[name] = (bm25, texts, metas)
+    return _bm25_cache[name]
+
+
+def hybrid_search(
+    question: str,
+    top_k: int | None = None,
+    corpus: str | None = None,
+    variant: str = "default",
+    where: dict | None = None,
+) -> list[Result]:
+    """Semantic + keyword retrieval, fused by reciprocal rank (unit 2).
+
+    Improvement 1. Semantic search ranks by cosine distance; BM25 ranks by
+    exact term overlap. Each chunk gets 1/(RRF_K + rank) from each ranker and
+    the sums decide the order. Reciprocal rank fusion rather than a weighted
+    score average, because cosine distance and BM25 scores are not on the same
+    scale and averaging them would mean inventing a conversion.
+
+    `Result.distance` stays the true cosine distance throughout. Only the
+    *order* changes, and the distances are directly comparable to the
+    semantic-only run.
+
+    One side effect, measured rather than assumed. `gate.py::check` thresholds
+    on `min(distance)` over the chunks it is *given*, and fusion can push the
+    globally-nearest chunk out of the returned top-k — so the gate can see a
+    worse best-distance than semantic search would have handed it. It can only
+    ever be worse, never better, because fusion cannot invent a nearer chunk.
+    Measured across all 15 questions (5 in-corpus, 5 OUT_OF_SCOPE, 5
+    REFUSAL_PROBES): all five in-corpus distances were unchanged, four
+    questions rose by 0.004 to 0.059, and no gate verdict changed. A worse
+    best-distance makes refusal more likely, not less, so the direction is the
+    safe one — but it is a real coupling between this improvement and criterion
+    3, and it is in the run logs rather than hidden here.
+
+    `where` is honoured on the semantic side only — Chroma applies it, and the
+    BM25 side is then filtered to the same chunks.
+    """
+    top_k = top_k or config.TOP_K
+    name = config.collection_name(corpus, variant)
+
+    try:
+        collection = _client().get_collection(name)
+    except Exception as exc:
+        raise RuntimeError(
+            f"No index called '{name}'. Run `python app.py index` first."
+        ) from exc
+
+    total = collection.count()
+    if not total:
+        return []
+
+    # Every chunk, so both rankers see the same candidate set and a fused rank
+    # is a rank over the whole corpus rather than over a pre-filtered shortlist.
+    raw = collection.query(
+        query_embeddings=embed([question]),
+        n_results=total,
+        where=where or None,
+    )
+
+    semantic: dict[str, dict] = {}
+    for rank, (text, meta, distance) in enumerate(
+        zip(raw["documents"][0], raw["metadatas"][0], raw["distances"][0]), start=1
+    ):
+        label = f"{meta.get('source', 'unknown')}#{meta.get('index', 0)}"
+        semantic[label] = {
+            "text": text,
+            "meta": meta,
+            "distance": float(distance),
+            "sem_rank": rank,
+        }
+
+    bm25, texts, metas = _bm25_for(name)
+    scores = bm25.get_scores(_tokenize(question))
+
+    lexical: dict[str, int] = {}
+    ordered = sorted(range(len(texts)), key=lambda i: scores[i], reverse=True)
+    for rank, i in enumerate(ordered, start=1):
+        meta = metas[i]
+        label = f"{meta.get('source', 'unknown')}#{meta.get('index', 0)}"
+        if label in semantic:  # respects `where`
+            lexical[label] = rank
+
+    fused = []
+    for label, entry in semantic.items():
+        score = 1.0 / (config.RRF_K + entry["sem_rank"])
+        if label in lexical:
+            score += 1.0 / (config.RRF_K + lexical[label])
+        fused.append((score, entry["distance"], label, entry))
+
+    # Highest fused score first; cosine distance breaks ties so the order is
+    # deterministic rather than dict-insertion order.
+    fused.sort(key=lambda row: (-row[0], row[1]))
+
+    results: list[Result] = []
+    for _score, _distance, _label, entry in fused[:top_k]:
+        meta = entry["meta"]
+        results.append(
+            Result(
+                text=entry["text"],
+                source=str(meta.get("source", "unknown")),
+                label=f"{meta.get('source', 'unknown')}#{meta.get('index', 0)}",
+                distance=entry["distance"],
+                produced_by=str(meta.get("produced_by", "unknown")),
+                category=str(meta.get("category", "other")),
+            )
+        )
+    return results
+
+
+def retrieve(
+    question: str,
+    top_k: int | None = None,
+    corpus: str | None = None,
+    variant: str = "default",
+    where: dict | None = None,
+    hybrid: bool | None = None,
+) -> list[Result]:
+    """Retrieve by whichever strategy is switched on.
+
+    One door into retrieval, so `app.py`, `run_eval.py` and anything else all
+    get the same strategy instead of each deciding for itself. `hybrid=None`
+    means "whatever config.HYBRID says".
+    """
+    use_hybrid = config.HYBRID if hybrid is None else hybrid
+    engine = hybrid_search if use_hybrid else search
+    return engine(question, top_k=top_k, corpus=corpus, variant=variant, where=where)
 
 
 def index_exists(corpus: str | None = None, variant: str = "default") -> bool:

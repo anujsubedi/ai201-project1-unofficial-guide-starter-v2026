@@ -46,6 +46,22 @@ TOP_K = 5               # how many chunks to pull back per question
 THRESHOLD = 0.7
 
 
+# ─── Hybrid search (unit 2, improvement 1) ───────────────────────────────────
+# Semantic search alone ranked the shuttle question's answer chunk first by
+# 0.007 of cosine distance, against a housing document with nothing to do with
+# shuttles. Every other question won its top slot by 0.148 to 0.349. "Shuttle"
+# is a rare exact term in this corpus, which is what BM25 scores well and what
+# embeddings average away, so keyword search is fused in alongside meaning.
+#
+# Set to False to reproduce the pre-improvement behaviour exactly:
+#   python run_eval.py --no-hybrid
+HYBRID = True
+
+# Reciprocal-rank-fusion constant. Standard default from the RRF paper; higher
+# values flatten the difference between adjacent ranks.
+RRF_K = 60
+
+
 # ─── Models ──────────────────────────────────────────────────────────────────
 # Embeddings run on your own machine and cost no API quota.
 # Only generation calls out to a service.

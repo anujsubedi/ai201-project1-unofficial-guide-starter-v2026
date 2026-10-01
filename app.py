@@ -196,12 +196,12 @@ def _where_from(args):
 
 def cmd_retrieve(args):
     """Milestone 4. Retrieval only, with distances, and no model call."""
-    from store import search
+    from store import retrieve
     import gate
 
     where = _where_from(args)
 
-    results = search(
+    results = retrieve(
         args.question,
         top_k=args.top_k or config.TOP_K,
         corpus=args.corpus or config.CORPUS,
@@ -263,7 +263,7 @@ def ask_pipeline(
     prompt just before it goes out — that's how `--show-prompt` shows you the
     prompt while the model is still thinking rather than after.
     """
-    from store import search
+    from store import retrieve
     import gate
     from generate import answer_from_chunks, build_prompt, condense_question
 
@@ -276,7 +276,7 @@ def ask_pipeline(
     if on_condense is not None and search_question != question:
         on_condense(search_question)
 
-    results = search(
+    results = retrieve(
         search_question,
         top_k=top_k or config.TOP_K,
         corpus=corpus or config.CORPUS,
