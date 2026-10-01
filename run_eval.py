@@ -51,6 +51,16 @@ def load_scorer():
     return judge if callable(judge) else None
 
 
+def load_refusal_scorer():
+    """Use scorer.py::judge_refusal for --probes runs (criterion 5)."""
+    try:
+        import scorer  # noqa: PLC0415
+    except ImportError:
+        return None
+    judge = getattr(scorer, "judge_refusal", None)
+    return judge if callable(judge) else None
+
+
 def run_once(question: str, top_k, threshold, corpus, variant):
     """One question, one run. Returns the answer and what retrieval gave us."""
     from store import search
@@ -76,13 +86,25 @@ def main():
     parser.add_argument("--variant", default="default")
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument(
+        "--probes",
+        action="store_true",
+        help="run REFUSAL_PROBES instead of QUESTIONS, scored as refuse/answer "
+             "(criterion 5). Keeps that test reproducible without editing "
+             "questions.py by hand.",
+    )
     args = parser.parse_args()
 
     corpus = args.corpus or config.CORPUS
     top_k = args.top_k or config.TOP_K
     threshold = config.THRESHOLD if args.threshold is None else args.threshold
 
-    items = qs.answered()
+    if args.probes:
+        # Criterion 5's test set. These have no `expects` — the thing being
+        # measured is whether the system declines, not what it says.
+        items = [{"question": q, "expects": ""} for q in qs.REFUSAL_PROBES]
+    else:
+        items = qs.answered()
     if not items:
         print(
             "questions.py has no questions in it yet.\n"
@@ -92,7 +114,15 @@ def main():
         sys.exit(1)
 
     judge = load_scorer()
-    if judge is None:
+    refusal_judge = load_refusal_scorer()
+    if args.probes and refusal_judge is None:
+        print(
+            "--probes needs scorer.py to define "
+            "judge_refusal(question, answer, results, gate_passed).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if judge is None and not args.probes:
         print("No scorer.py found — running unscored. Verdict column will be blank.")
         print("You'll build scorer.py in class in unit 2.\n")
 
@@ -112,7 +142,12 @@ def main():
             answer, results, decision = run_once(
                 question, top_k, threshold, corpus, args.variant
             )
-            passed = judge(question, expects, answer, results) if judge else None
+            if args.probes:
+                # "pass" here means the system refused, which is the desired
+                # outcome for a probe. Scored by scorer.py::judge_refusal.
+                passed = refusal_judge(question, answer, results, decision.passed)
+            else:
+                passed = judge(question, expects, answer, results) if judge else None
             run_results.append(passed)
 
             mark = {True: "pass", False: "fail", None: "—"}[passed]
@@ -135,7 +170,7 @@ def main():
 
     write_report(
         rows, transcript, gate_rows, args, corpus, top_k, threshold,
-        scored=judge is not None,
+        scored=args.probes or judge is not None,
     )
 
 
@@ -200,6 +235,18 @@ def write_report(rows, transcript, gate_rows, args, corpus, top_k, threshold, sc
         "one row per CRITERION, so aggregate these into it — criterion 1 is how many",
         "of your questions had the answer in the retrieved chunks, and so on.",
         "",
+    ]
+
+    if args.probes:
+        lines += [
+            "⚠️ This is a `--probes` run: the questions are `REFUSAL_PROBES` from",
+            "`questions.py`, not `QUESTIONS`. **`pass` means the system REFUSED**,",
+            "which is the wanted outcome here, and `fail` means it answered. Scored",
+            "by `scorer.py::judge_refusal`. This is the evidence for criterion 5.",
+            "",
+        ]
+
+    lines += [
         f"| Question | {run_headers} |",
         f"|---|{run_divider}|",
     ]
