@@ -62,7 +62,7 @@ def cmd_categories(args):
 
 def cmd_index(args):
     from ingest import load_documents, describe as describe_docs
-    from chunker import split_documents, describe as describe_chunks
+    from chunker import split_documents, fallback_split, describe as describe_chunks
     from store import build_index
 
     corpus = args.corpus or config.CORPUS
@@ -73,7 +73,12 @@ def cmd_index(args):
     documents = load_documents(corpus)
     print(f"  loaded   {describe_docs(documents)}")
 
-    chunks = split_documents(documents)
+    if getattr(args, "chunker", "custom") == "fallback":
+        chunks = fallback_split(
+            documents, chunk_size=args.chunk_size, overlap=args.overlap
+        )
+    else:
+        chunks = split_documents(documents)
     print(f"  chunked  {describe_chunks(chunks)}")
 
     print(f"  embedding {len(chunks)} chunks (first run downloads the model)...")
@@ -453,6 +458,33 @@ def build_parser():
 
     p_index = sub.add_parser("index", help="build the search index")
     p_index.set_defaults(func=cmd_index)
+    # Unit 2 stretch: index the same corpus with a second chunking strategy, so
+    # both can be queried instead of one replacing the other. Pair with
+    # --variant, e.g.
+    #   python app.py index --chunker fallback --chunk-size 200 \
+    #                       --overlap 50 --variant v2
+    p_index.add_argument(
+        "--chunker",
+        choices=["custom", "fallback"],
+        default="custom",
+        help="custom = chunker.py::split_documents (one chunk per file, the "
+             "default); fallback = chunker.py::fallback_split (fixed-size "
+             "character windows)",
+    )
+    p_index.add_argument(
+        "--chunk-size",
+        type=int,
+        default=None,
+        help=f"characters per chunk for --chunker fallback "
+             f"(default config.CHUNK_SIZE = {config.CHUNK_SIZE})",
+    )
+    p_index.add_argument(
+        "--overlap",
+        type=int,
+        default=None,
+        help=f"characters shared between neighbouring chunks for --chunker "
+             f"fallback (default config.CHUNK_OVERLAP = {config.CHUNK_OVERLAP})",
+    )
 
     p_chunks = sub.add_parser("chunks", help="print sample chunks (Milestone 3)")
     p_chunks.add_argument("-n", type=int, default=5, help="how many to print")

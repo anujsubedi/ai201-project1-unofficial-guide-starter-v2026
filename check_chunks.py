@@ -38,10 +38,26 @@ import config
 import ingest
 
 
-def sample_chunks(seed: int, size: int = 5):
-    """One sample of `size` chunks, judged whole-and-alone. Deterministic in seed."""
+def _chunk_corpus(strategy: str = "custom", chunk_size=None, overlap=None):
+    """Chunk the corpus with whichever strategy is asked for.
+
+    "custom" is `chunker.py::split_documents`, one chunk per file. "fallback"
+    is `chunker.py::fallback_split`, fixed-size character windows — the unit 2
+    stretch comparison. Criterion 4 is a statement about the chunker, so it has
+    to be measurable against either one.
+    """
     documents = ingest.load_documents()
-    chunks = chunker.split_documents(documents)
+    if strategy == "fallback":
+        chunks = chunker.fallback_split(documents, chunk_size=chunk_size, overlap=overlap)
+    else:
+        chunks = chunker.split_documents(documents)
+    return documents, chunks
+
+
+def sample_chunks(seed: int, size: int = 5, strategy: str = "custom",
+                  chunk_size=None, overlap=None):
+    """One sample of `size` chunks, judged whole-and-alone. Deterministic in seed."""
+    documents, chunks = _chunk_corpus(strategy, chunk_size, overlap)
 
     doc_text = {d.source: d.text for d in documents}
     by_source: dict[str, list] = {}
@@ -73,10 +89,9 @@ def sample_chunks(seed: int, size: int = 5):
     return rows, {"documents": len(documents), "chunks": len(chunks), "files": len(by_source)}
 
 
-def corpus_wide():
+def corpus_wide(strategy: str = "custom", chunk_size=None, overlap=None):
     """The same check over every chunk, not just a sample."""
-    documents = ingest.load_documents()
-    chunks = chunker.split_documents(documents)
+    documents, chunks = _chunk_corpus(strategy, chunk_size, overlap)
     doc_text = {d.source: d.text for d in documents}
 
     by_source: dict[str, list] = {}
@@ -98,12 +113,17 @@ def main():
     parser.add_argument("--seeds", type=int, nargs="+", default=[201, 202, 203])
     parser.add_argument("--size", type=int, default=5)
     parser.add_argument("--label", default="")
+    parser.add_argument("--chunker", choices=["custom", "fallback"], default="custom")
+    parser.add_argument("--chunk-size", type=int, default=None)
+    parser.add_argument("--overlap", type=int, default=None)
     args = parser.parse_args()
 
     samples = []
     stats = {}
     for seed in args.seeds:
-        rows, stats = sample_chunks(seed, args.size)
+        rows, stats = sample_chunks(
+            seed, args.size, args.chunker, args.chunk_size, args.overlap
+        )
         passed = sum(r["passed"] for r in rows)
         samples.append({"seed": seed, "rows": rows, "passed": passed})
         print(f"seed {seed}: {passed} of {len(rows)} whole and uncut")
@@ -115,7 +135,7 @@ def main():
                 f"{row['siblings']} chunk(s) from this file"
             )
 
-    wide = corpus_wide()
+    wide = corpus_wide(args.chunker, args.chunk_size, args.overlap)
     print(
         f"\nCorpus-wide: {wide['chunks']} chunks from {wide['files']} files, "
         f"{len(wide['split_files'])} file(s) split across chunks, "
@@ -141,6 +161,11 @@ def write_report(samples, stats, wide, args):
         f"- Corpus: `{config.CORPUS}` — {stats.get('documents', 0)} documents, "
         f"{stats.get('chunks', 0)} chunks",
         f"- Sample size: {args.size} · seeds: {', '.join(str(s) for s in args.seeds)}",
+        f"- Chunker: `chunker.py::"
+        f"{'fallback_split' if args.chunker == 'fallback' else 'split_documents'}`"
+        + (f" — chunk_size {args.chunk_size or config.CHUNK_SIZE}, "
+           f"overlap {args.overlap or config.CHUNK_OVERLAP}"
+           if args.chunker == "fallback" else " — one chunk per file"),
         f"- When: {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
         "This is the evidence for criterion 4 in criteria.md: \"In a random sample",
